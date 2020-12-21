@@ -1,0 +1,224 @@
+---
+title: '1111'
+author: "jgh0208"
+date: '2019 11 11 '
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#이항로지스틱-로짓변환
+```{r}
+#선형그림
+eta <- seq(-10,10,length=1000)
+plot(eta)
+
+#로지스틱모형식과 같은 함수만들기
+f <- function(eta) exp(eta)/(1+exp(eta))
+f(2)
+f(eta)
+
+##문제: 그래프그려보기## 
+#x축은 eta값이고 y축은 f(eta)
+
+
+
+```
+
+#데이터불러오기
+```{r}
+lungcancer <- read.table("./data/lung-cancer.txt",header=T)
+head(lungcancer)
+# LC:폐암여부, SEX:성별, BK:인종(N:흑인,Y:백인), SS:사회적계층(H:상류층,L:하류층), AG:나이, YR:흡연이력
+```
+
+#이항로지스틱분석-변수선택법
+```{r}
+#install.packages("car") : vif(다중공선성)함수사용위한 패키지 
+library(car)
+
+#그냥 모든 변수들을 다 넣고 돌렸을때 
+flca <- glm(LC~SEX+BK+SS+AG+YR,data = lungcancer,family = binomial)
+flca  
+summary(flca)  
+vif(flca)
+#vif는 10을 넘으면 심각한문제가 있다고 본다.
+
+
+#전진선택법으로 변수를 선택했을 때
+flcf 
+
+#후진제거법으로 변수를 선택했을 때
+flcb
+
+#단계적선택법으로 변수를 선택했을 때
+flcs
+
+```
+
+#확률예측해보기
+```{r}
+##모든변수들을 다 넣고 돌렸을때 
+#성별:여자,인종:흑인,사회적계층:상류층,나이:65,흡연이력:30 일때 폐암에 걸릴확률예측
+(ne <- predict(flca,newdata = list(SEX="F",BK="N",SS="H",AG=65,YR=30)))
+exp(ne)/(1+exp(ne))
+predict(flca,newdata = list(SEX="F",BK="N",SS="H",AG=65,YR=30),type = "response")
+
+
+
+##후진제거법으로 변수를 선택했을 때
+#인종:흑인,흡연이력:30 일때 폐암에 걸릴확률예측 
+(fne <- predict(flcb,newdata = list(BK="N",YR=30))) 
+
+##문제: 밑에 함수와 같은 값이 나오게하려면 어떻게 계산해야할까?##
+predict(flcb,newdata = list(BK="N",YR=30),type = "response")
+
+
+```
+
+#검정통계량-우도비검정 
+```{r}
+#install.packages("rms")
+library(rms)
+lrm(flcb)
+```
+
+#이항로지스틱-Roc
+```{r}
+#install.packages(c("Epi","pROC","ztable","moonbook"))
+require(Epi)
+require(pROC)
+require(ztable)
+require(moonBook)
+
+#각 변수별로 ROC곡선그리기
+rocb <- roc(formula=LC~as.numeric(BK),data = lungcancer)  
+plot(rocb,col="red")   
+rocy <- roc(formula=LC~YR,data = lungcancer)  
+plot(rocy,add=T,col="purple")   
+
+#각 변수별 AUC확인 
+auc(rocb)
+auc(rocy)
+
+##plot.roc의 옵션에서 자동으로 cutoff를 알아낼수있다. 
+#각 변수별로 ROC곡선,cutoff그려보기
+#BK에대한 ROC,cutoff
+#BK가 1,2로 코딩되어있는 범주형데이터라 cutoff가 1.5가 나옴 
+plot.roc(rocb,   #roc를 계산한 value
+         col="red",   #색상
+         print.auc=TRUE,   #auc출력
+         max.auc.polygon=TRUE,   #auc면적
+         print.thres=TRUE, print.thres.pch=19,
+         print.thres.col = "red",   #cut-off value출력(포인트,색상)
+         auc.polygon=TRUE, auc.polygon.col="#D1F2EB")   # 선아래면적출력,색상
+
+plot.roc(rocy,   #roc를 계산한 value
+         col="red",   #색상
+         print.auc=TRUE,   #auc출력
+         max.auc.polygon=TRUE,   #auc면적
+         print.thres=TRUE, print.thres.pch=19,
+         print.thres.col = "red",   #cut-off value출력(포인트,색상)
+         auc.polygon=TRUE, auc.polygon.col="#D1F2EB")   # 선아래면적출력,색상
+
+#로지스틱모델로 그린 ROC,cutoff
+source("./R/ROC_sub.R")
+
+a3=ROC(form=LC~as.numeric(BK)+YR,data=lungcancer,plot="")
+plot_ROC(a3,show.sens=F,col = "blue")
+
+```
+
+#이항로지스틱-ROC-직접그려보기
+```{r}
+#예측모델로 Y의 추정치 구하기
+lungcancer$yestimate <- predict(flcb,newdata =list(BK=lungcancer$BK,YR=lungcancer$YR),type = "response")
+
+#cutoff를 구하기 위한 구간을 만들어주기
+co <- seq(0.01,1,by=0.01)
+
+#install.packages("caret")
+library(caret)
+#install.packages("ROCR")
+library(ROCR)
+
+codf <- data.frame(codf <- lungcancer$LC)
+for (i in 1:length(co)) {
+  codf[,i+1] <- ifelse(lungcancer$yestimate>co[i],1,0)
+}
+
+#그냥 이름바꿔준것(col)
+colnames(codf) <- c("Y",paste0(rep("yh",100),seq(1,100,by=1)))
+codf
+
+#민감도계산위한 실제맞는데 맞게예측된값 
+rlc <- sum(codf$Y==1)
+
+#특이도계산위한 실제아닌데 아니게 예측된값 
+rnlc <- sum(codf$Y==0)
+
+#민감도,특이도등 데이터를 넣어줄 데이터프레임에 cutoff구간을 넣어준다. 
+cdf <- as.data.frame(co)
+
+#민감도 
+for (i in 1:length(co)) {
+  a <- table(codf[,1],codf[,i+1])
+  ifelse(is.na(a[4]),0,a[4])
+  ifelse(is.na(a[2]),0,a[2])
+  cdf[i,2] <- ifelse(is.na((a[4]/(a[2]+a[4]))),0,(a[4]/(a[2]+a[4])))
+}
+
+#특이도
+for (i in 1:length(co)) {
+  a <- table(codf[,1],codf[,i+1])
+  ifelse(is.na(a[3]),0,a[3])
+  ifelse(is.na(a[1]),0,a[1])
+  cdf[i,3] <- ifelse(is.na((a[1]/(a[1]+a[3]))),0,(a[1]/(a[1]+a[3])))
+}
+
+#1-특이도 
+cdf[,4] <- 1-cdf[,3]
+
+colnames(cdf) <- c("cutoff","sensitivity","specificity","1-specificity")
+
+#roc
+plot(cdf$`1-specificity`,cdf$sensitivity,type = "p",
+     xlab = "1-specificity",ylab = "sensitivity",pch=19,col="blue")
+
+#####cutoff-point구하기 
+
+#정분류율 accuracy
+for (i in 1:length(co)) {
+  a <- table(codf[,1],codf[,i+1])
+  ifelse(is.na(a[4]),0,a[4])
+  ifelse(is.na(a[2]),0,a[2])
+  ifelse(is.na(a[3]),0,a[3])
+  ifelse(is.na(a[1]),0,a[1])
+  cdf[i,5] <- ifelse(is.na((a[1]+a[3]/(a[1]+a[3]+a[2]+a[4]))),0,(a[1]+a[3]/(a[1]+a[3]+a[2]+a[4])))
+}
+colnames(cdf) <- c("cutoff","sensitivity","specificity","1-specificity","accuracy")
+
+#정분류율이 가장 높은 cutoff값알아보기????근데 값ㅇ이 이상함 정분류율이 아니라 민감도와 특이도가 가장큰부분을 봐야하는거아닌가?
+which(max(cdf$accuracy)==cdf$accuracy)
+cdf[73:76,]
+table(codf[,1],codf[,73])
+table(codf[,1],codf[,74])
+table(codf[,1],codf[,75])
+table(codf[,1],codf[,76])
+
+which(max(cdf$V5)==cdf$V5)
+
+
+#그래프로 그려서 나타내보기
+plot(cdf$`1-specificity`,cdf$sensitivity,type = "p",
+     xlab = "1-specificity",ylab = "sensitivity",pch=19,col="blue")
+par(new=T)
+plot(cdf$`1-specificity`[39],cdf$sensitivity[39],add=T,
+     xlim = c(0,1),ylim = c(0,1),type = "p",pch=8,col="red",
+     xlab = "",ylab = "")
+
+```
